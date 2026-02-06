@@ -66,6 +66,41 @@ function runCommand(
   });
 }
 
+// Recursively collect .ts files under convex/, skipping _generated and node_modules
+function getConvexTsFiles(convexDir: string): { filePath: string; relPath: string }[] {
+  const results: { filePath: string; relPath: string }[] = [];
+
+  function walk(dir: string) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (
+        entry.isDirectory() &&
+        entry.name !== "_generated" &&
+        entry.name !== "node_modules"
+      ) {
+        walk(fullPath);
+      } else if (
+        entry.isFile() &&
+        entry.name.endsWith(".ts") &&
+        !entry.name.endsWith(".d.ts") &&
+        entry.name !== "tsconfig.json"
+      ) {
+        const relPath = fullPath.slice(convexDir.length + 1);
+        results.push({ filePath: fullPath, relPath });
+      }
+    }
+  }
+
+  walk(convexDir);
+  return results;
+}
+
 // Client-only packages that should never appear in convex/ server code
 const CLIENT_ONLY_PACKAGES = [
   "react",
@@ -83,18 +118,9 @@ const CLIENT_ONLY_PACKAGES = [
 function checkUnusedGeneratedImports(cwd: string): string[] {
   const convexDir = join(cwd, "convex");
   const errors: string[] = [];
+  const files = getConvexTsFiles(convexDir);
 
-  let files: string[];
-  try {
-    files = readdirSync(convexDir).filter(
-      (f) => f.endsWith(".ts") && !f.endsWith(".d.ts") && f !== "tsconfig.json"
-    );
-  } catch {
-    return [];
-  }
-
-  for (const file of files) {
-    const filePath = join(convexDir, file);
+  for (const { filePath, relPath } of files) {
     let content: string;
     try {
       content = readFileSync(filePath, "utf-8");
@@ -126,7 +152,7 @@ function checkUnusedGeneratedImports(cwd: string): string[] {
         // Word-boundary check: the name must appear as its own token
         const usageRegex = new RegExp(`\\b${name}\\b`);
         if (!usageRegex.test(contentWithoutImportLine)) {
-          errors.push(`convex/${file}: unused import "${name}" from _generated`);
+          errors.push(`convex/${relPath}: unused import "${name}" from _generated`);
         }
       }
     }
@@ -138,18 +164,9 @@ function checkUnusedGeneratedImports(cwd: string): string[] {
 function checkClientImportsInConvex(cwd: string): string[] {
   const convexDir = join(cwd, "convex");
   const errors: string[] = [];
+  const files = getConvexTsFiles(convexDir);
 
-  let files: string[];
-  try {
-    files = readdirSync(convexDir).filter(
-      (f) => f.endsWith(".ts") && !f.endsWith(".d.ts")
-    );
-  } catch {
-    return [];
-  }
-
-  for (const file of files) {
-    const filePath = join(convexDir, file);
+  for (const { filePath, relPath } of files) {
     let content: string;
     try {
       content = readFileSync(filePath, "utf-8");
@@ -165,7 +182,7 @@ function checkClientImportsInConvex(cwd: string): string[] {
       for (const pkg of CLIENT_ONLY_PACKAGES) {
         if (source === pkg || source.startsWith(pkg + "/")) {
           errors.push(
-            `convex/${file}: imports client-only package "${source}"`
+            `convex/${relPath}: imports client-only package "${source}"`
           );
         }
       }
@@ -191,7 +208,7 @@ const DIAGRAM_MAPPINGS: DiagramMapping[] = [
   },
   {
     diagram: "functions.md",
-    patterns: [/convex\/[^/]+\.ts$/],
+    patterns: [/convex\/(?!schema\.)[^/]+\.ts$/],
   },
   {
     diagram: "auth-flow.md",
@@ -299,13 +316,10 @@ async function main() {
     return;
   }
 
-  // All checks passed — check if diagrams need updating, then commit
+  // All checks passed — update diagrams if needed
   const affectedDiagrams = getAffectedDiagrams(changedFiles, input.cwd);
   const diagramDir = join(input.cwd, DIAGRAM_DIR);
   const diagramsExist = existsSync(diagramDir);
-
-  const commitPrompt =
-    "Generate a concise commit message for the staged changes. Do not commit anything sensitive like .env files. Stage and commit.";
 
   if (affectedDiagrams.length > 0) {
     const existingDiagrams = diagramsExist
@@ -316,7 +330,7 @@ async function main() {
       : affectedDiagrams;
 
     console.error(
-      `Diagrams needing update: ${affectedDiagrams.join(", ")}. Spawning diagram updater then commit agent...`
+      `Diagrams needing update: ${affectedDiagrams.join(", ")}. Spawning diagram updater...`
     );
 
     const diagramPrompt = [
@@ -334,38 +348,18 @@ async function main() {
       .filter(Boolean)
       .join(" ");
 
-    // Chain: sonnet updates diagrams, then haiku commits everything
     const child = spawn(
-      "bash",
-      [
-        "-c",
-        'claude -p --model sonnet "$DIAGRAM_PROMPT" && claude -p --model haiku "$COMMIT_PROMPT"',
-      ],
+      "claude",
+      ["-p", "--model", "sonnet", diagramPrompt],
       {
         cwd: input.cwd,
         stdio: "ignore",
         detached: true,
-        env: {
-          ...process.env,
-          DIAGRAM_PROMPT: diagramPrompt,
-          COMMIT_PROMPT: commitPrompt,
-        },
       }
     );
     child.unref();
   } else {
-    // No diagrams affected — just commit
-    console.error("All checks passed. Spawning background commit agent...");
-    const child = spawn(
-      "claude",
-      ["-p", "--model", "haiku", commitPrompt],
-      {
-        cwd: input.cwd,
-        stdio: "ignore",
-        detached: true,
-      }
-    );
-    child.unref();
+    console.error("All checks passed.");
   }
 }
 
