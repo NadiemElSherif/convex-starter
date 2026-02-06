@@ -23,15 +23,21 @@ website_data/
     └── README.md (Contact Us section)
 ```
 
-## 🔥 MUST-READ COMPREHENSIVE APP FILES (New!)
+## 🔥 MUST-READ COMPREHENSIVE FILES (Start Here!)
 
+### App Features & Functionality
 | File | What It Contains |
 |------|-----------------|
-| **[APP_CAPABILITIES_SUMMARY.md](./APP_CAPABILITIES_SUMMARY.md)** | ✅ COMPLETE checklist of everything the app can do - most comprehensive overview |
-| **[APP_FEATURES.md](./APP_FEATURES.md)** | Detailed features, methods, pricing, scientific foundation - deep dive into app |
-| **[FAQ.md](./FAQ.md)** | All frequently asked questions with detailed answers about methods, challenges, guarantee |
+| **[APP_CAPABILITIES_SUMMARY.md](./APP_CAPABILITIES_SUMMARY.md)** | ✅ COMPLETE checklist of 150+ app features organized by category |
+| **[APP_FEATURES.md](./APP_FEATURES.md)** | Detailed features, methods, pricing, scientific foundation - deep dive |
+| **[FAQ.md](./FAQ.md)** | All frequently asked questions with detailed answers |
 
-**Start here** if you want everything about what the app can do!
+### Company & Team
+| File | What It Contains |
+|------|-----------------|
+| **[COMPANY_AND_TEAM.md](./COMPANY_AND_TEAM.md)** | Complete team roster, expertise, company philosophy, partnerships |
+
+**These 4 files contain 90% of everything important about Go Potty®!**
 
 ---
 
