@@ -99,15 +99,16 @@ export const processTranscription = action({
       );
 
       // Submit to NCAT
-      const submitResponse = await fetch(`${ncatBaseUrl}/transcribe`, {
+      const submitResponse = await fetch(`${ncatBaseUrl}/v1/media/transcribe`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${ncatApiKey}`,
+          "x-api-key": ncatApiKey,
         },
         body: JSON.stringify({
-          audio_url: audioUrl,
+          media_url: audioUrl,
           language: "en",
+          include_text: true,
         }),
       });
 
@@ -117,7 +118,18 @@ export const processTranscription = action({
       }
 
       const submitData = await submitResponse.json();
-      const jobId = submitData.jobId || submitData.job_id;
+      const jobId = submitData.job_id;
+
+      // If response is 200 with direct result (no queuing)
+      if (submitData.code === 200 && submitData.response?.text) {
+        const transcript = submitData.response.text;
+        await ctx.runMutation(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "transcriptions:completeTranscription" as any,
+          { id: transcriptionId, transcript }
+        );
+        return { success: true, transcript };
+      }
 
       if (!jobId) {
         throw new Error("NCAT did not return a job ID");
@@ -130,8 +142,13 @@ export const processTranscription = action({
       for (let i = 0; i < maxPolls; i++) {
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-        const statusResponse = await fetch(`${ncatBaseUrl}/job/${jobId}`, {
-          headers: { Authorization: `Bearer ${ncatApiKey}` },
+        const statusResponse = await fetch(`${ncatBaseUrl}/v1/toolkit/job/status`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": ncatApiKey,
+          },
+          body: JSON.stringify({ job_id: jobId }),
         });
 
         if (!statusResponse.ok) {
@@ -139,33 +156,29 @@ export const processTranscription = action({
         }
 
         const statusData = await statusResponse.json();
+        const jobStatus = statusData.response?.job_status || statusData.job_status;
 
-        if (statusData.status === "completed") {
-          let transcript = "";
-          if (statusData.segments && Array.isArray(statusData.segments)) {
-            transcript = statusData.segments
-              .map((s: { speaker?: string; text?: string }) => {
-                const speaker = s.speaker || "SPEAKER";
-                return `[${speaker}]: ${s.text || ""}`;
-              })
-              .join("\n");
-          } else if (statusData.text) {
-            transcript = statusData.text;
+        if (jobStatus === "done" || jobStatus === "completed") {
+          const transcript =
+            statusData.response?.response?.text ||
+            statusData.response?.text ||
+            statusData.text ||
+            "";
+
+          if (!transcript) {
+            throw new Error("NCAT returned empty transcript");
           }
 
           // Save transcript (mutation schedules RAG processing)
           await ctx.runMutation(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             "transcriptions:completeTranscription" as any,
-            {
-              id: transcriptionId,
-              transcript,
-            }
+            { id: transcriptionId, transcript }
           );
 
           return { success: true, transcript };
-        } else if (statusData.status === "failed") {
-          throw new Error(statusData.error || "Transcription failed");
+        } else if (jobStatus === "failed" || jobStatus === "error") {
+          throw new Error(statusData.response?.error || statusData.error || "Transcription failed");
         }
       }
 
