@@ -1,25 +1,33 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
-export const storeChunk = mutation({
+const chunkSchema = v.object({
+  text: v.string(),
+  embedding: v.array(v.float64()),
+  sourceType: v.union(v.literal("document"), v.literal("transcription")),
+  sourceId: v.string(),
+  chunkIndex: v.number(),
+  createdBy: v.id("users"),
+});
+
+export const storeChunks = mutation({
   args: {
-    text: v.string(),
-    embedding: v.array(v.float64()),
-    sourceType: v.union(v.literal("document"), v.literal("transcription")),
-    sourceId: v.string(),
-    chunkIndex: v.number(),
-    createdBy: v.id("users"),
+    chunks: v.array(chunkSchema),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("documentChunks", {
-      text: args.text,
-      embedding: args.embedding,
-      sourceType: args.sourceType,
-      sourceId: args.sourceId,
-      chunkIndex: args.chunkIndex,
-      createdBy: args.createdBy,
-      createdAt: Date.now(),
-    });
+    const now = Date.now();
+    for (const chunk of args.chunks) {
+      await ctx.db.insert("documentChunks", {
+        text: chunk.text,
+        embedding: chunk.embedding,
+        sourceType: chunk.sourceType,
+        sourceId: chunk.sourceId,
+        chunkIndex: chunk.chunkIndex,
+        createdBy: chunk.createdBy,
+        createdAt: now,
+      });
+    }
+    return args.chunks.length;
   },
 });
 

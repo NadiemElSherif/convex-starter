@@ -3,19 +3,35 @@
 import { action } from "./_generated/server";
 import { v } from "convex/values";
 import { extractText as extractPdfText } from "unpdf";
+import * as Minio from "minio";
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+const CHUNK_BATCH_SIZE = 15; // chunks per storeChunks mutation (stay under 1MB arg limit)
 
-// --- Text chunking helpers ---
+// --- MinIO helpers (mirrors fileActions.ts) ---
+
+function getMinioClient() {
+  const endpoint = process.env.S3_ENDPOINT;
+  if (!endpoint) throw new Error("S3_ENDPOINT not configured");
+
+  const url = new URL(endpoint);
+  return new Minio.Client({
+    endPoint: url.hostname,
+    port: url.port ? parseInt(url.port) : url.protocol === "https:" ? 443 : 80,
+    useSSL: url.protocol === "https:",
+    accessKey: process.env.S3_ACCESS_KEY || "",
+    secretKey: process.env.S3_SECRET_KEY || "",
+    region: process.env.S3_REGION || "us-east-1",
+  });
+}
+
+// --- Text chunking ---
 
 function chunkText(text: string): string[] {
-  const TARGET_CHUNK_SIZE = 500; // ~tokens (roughly chars / 4, but we use chars as proxy)
-  const OVERLAP = 50;
-  const MAX_CHARS = TARGET_CHUNK_SIZE * 4; // ~2000 chars
-  const OVERLAP_CHARS = OVERLAP * 4; // ~200 chars
+  const MAX_CHARS = 2000; // ~500 tokens
+  const OVERLAP_CHARS = 200; // ~50 tokens
 
-  // Split by double newlines (paragraphs)
   const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
 
   const chunks: string[] = [];
@@ -35,7 +51,6 @@ function chunkText(text: string): string[] {
       for (const sentence of sentences) {
         if ((sentenceChunk + " " + sentence).length > MAX_CHARS && sentenceChunk) {
           chunks.push(sentenceChunk.trim());
-          // Overlap: keep tail of previous chunk
           const overlap = sentenceChunk.slice(-OVERLAP_CHARS);
           sentenceChunk = overlap + " " + sentence;
         } else {
@@ -50,7 +65,6 @@ function chunkText(text: string): string[] {
 
     if ((currentChunk + "\n\n" + trimmed).length > MAX_CHARS && currentChunk) {
       chunks.push(currentChunk.trim());
-      // Overlap: keep tail of previous chunk
       const overlap = currentChunk.slice(-OVERLAP_CHARS);
       currentChunk = overlap + "\n\n" + trimmed;
     } else {
@@ -62,9 +76,10 @@ function chunkText(text: string): string[] {
     chunks.push(currentChunk.trim());
   }
 
-  // Filter out very short chunks
   return chunks.filter((c) => c.length > 20);
 }
+
+// --- Text extraction ---
 
 async function extractTextFromFile(
   buffer: Buffer,
@@ -75,11 +90,10 @@ async function extractTextFromFile(
     const { text } = await extractPdfText(new Uint8Array(buffer));
     return text.join("\n");
   }
-  // Plain text, markdown, etc.
   return buffer.toString("utf-8");
 }
 
-// --- Embedding actions ---
+// --- Embedding API (called directly, not via action) ---
 
 async function callEmbeddingAPI(
   apiKey: string,
@@ -93,71 +107,51 @@ async function callEmbeddingAPI(
       "HTTP-Referer": "https://convex-starter.app",
       "X-Title": "Convex Starter",
     },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input,
-    }),
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Embedding API error: ${response.status} - ${errorText}`
-    );
+    throw new Error(`Embedding API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   return data.data.map((item: { embedding: number[] }) => item.embedding);
 }
 
+async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const API_BATCH = 20;
+  const all: number[][] = [];
+  for (let i = 0; i < texts.length; i += API_BATCH) {
+    const batch = texts.slice(i, i + API_BATCH);
+    const embeddings = await callEmbeddingAPI(apiKey, batch);
+    all.push(...embeddings);
+  }
+  return all;
+}
+
+// --- Single embedding action (used by chat for query embedding) ---
+
 export const generateEmbedding = action({
-  args: {
-    text: v.string(),
-  },
+  args: { text: v.string() },
   handler: async (_ctx, args) => {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY not configured");
-
     const embeddings = await callEmbeddingAPI(apiKey, args.text);
     return embeddings[0];
   },
 });
 
-export const generateEmbeddings = action({
-  args: {
-    texts: v.array(v.string()),
-  },
-  handler: async (_ctx, args) => {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY not configured");
-
-    if (args.texts.length === 0) return [];
-
-    // Batch in groups of 20 to avoid API limits
-    const BATCH_SIZE = 20;
-    const allEmbeddings: number[][] = [];
-
-    for (let i = 0; i < args.texts.length; i += BATCH_SIZE) {
-      const batch = args.texts.slice(i, i + BATCH_SIZE);
-      const embeddings = await callEmbeddingAPI(apiKey, batch);
-      allEmbeddings.push(...embeddings);
-    }
-
-    return allEmbeddings;
-  },
-});
-
-// --- Processing pipeline actions ---
+// --- Processing pipelines (scheduled by mutations, no action-to-action) ---
 
 export const processDocument = action({
-  args: {
-    fileMetadataId: v.id("fileMetadata"),
-  },
+  args: { fileMetadataId: v.id("fileMetadata") },
   handler: async (ctx, args) => {
     const { fileMetadataId } = args;
 
     try {
-      // Set ragStatus to processing
+      // Set ragStatus → processing
       await ctx.runMutation(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         "documentChunks:updateFileRagStatus" as any,
@@ -170,171 +164,136 @@ export const processDocument = action({
         "documentChunks:getFileMetadata" as any,
         { fileId: fileMetadataId }
       );
-
       if (!file) throw new Error("File metadata not found");
 
-      // Download file from MinIO
-      const downloadUrl = await ctx.runAction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "fileActions:generateDownloadUrl" as any,
-        { storageKey: file.storageKey }
-      );
+      // Generate presigned download URL directly (no action-to-action)
+      const client = getMinioClient();
+      const bucket = process.env.S3_BUCKET_NAME || "uploads";
+      const downloadUrl = await client.presignedGetObject(bucket, file.storageKey, 3600);
 
+      // Download + extract text
       const response = await fetch(downloadUrl);
-      if (!response.ok) throw new Error(`Failed to download file: ${response.status}`);
-
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      // Extract text
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const buffer = Buffer.from(await response.arrayBuffer());
       const text = await extractTextFromFile(buffer, file.mimeType, file.fileName);
-      if (!text.trim()) {
-        throw new Error("No text content extracted from file");
-      }
+      if (!text.trim()) throw new Error("No text content extracted from file");
 
-      // Chunk text
+      // Chunk + embed (all inline, no action-to-action)
       const chunks = chunkText(text);
-      if (chunks.length === 0) {
-        throw new Error("No chunks generated from text");
-      }
+      if (chunks.length === 0) throw new Error("No chunks generated from text");
 
-      // Generate embeddings in batch
-      const embeddings = await ctx.runAction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "embeddings:generateEmbeddings" as any,
-        { texts: chunks }
-      );
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) throw new Error("OPENROUTER_API_KEY not configured");
+      const embeddings = await embedBatch(apiKey, chunks);
 
-      // Store chunks
-      for (let i = 0; i < chunks.length; i++) {
+      // Store in batches via storeChunks mutation
+      for (let i = 0; i < chunks.length; i += CHUNK_BATCH_SIZE) {
+        const batch = chunks.slice(i, i + CHUNK_BATCH_SIZE).map((text, j) => ({
+          text,
+          embedding: embeddings[i + j],
+          sourceType: "document" as const,
+          sourceId: fileMetadataId,
+          chunkIndex: i + j,
+          createdBy: file.createdBy,
+        }));
         await ctx.runMutation(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "documentChunks:storeChunk" as any,
-          {
-            text: chunks[i],
-            embedding: embeddings[i],
-            sourceType: "document",
-            sourceId: fileMetadataId,
-            chunkIndex: i,
-            createdBy: file.createdBy,
-          }
+          "documentChunks:storeChunks" as any,
+          { chunks: batch }
         );
       }
 
-      // Set ragStatus to completed
+      // Set ragStatus → completed
       await ctx.runMutation(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         "documentChunks:updateFileRagStatus" as any,
         { fileId: fileMetadataId, ragStatus: "completed" }
       );
 
-      console.log(
-        `[RAG] Processed document ${file.fileName}: ${chunks.length} chunks`
-      );
-
+      console.log(`[RAG] Processed document ${file.fileName}: ${chunks.length} chunks`);
       return { success: true, chunksCreated: chunks.length };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[RAG] Failed to process document ${fileMetadataId}: ${msg}`);
-
       try {
         await ctx.runMutation(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           "documentChunks:updateFileRagStatus" as any,
           { fileId: fileMetadataId, ragStatus: "failed" }
         );
-      } catch {
-        // Ignore status update failure
-      }
-
+      } catch { /* ignore */ }
       return { success: false, error: msg };
     }
   },
 });
 
 export const processTranscription = action({
-  args: {
-    transcriptionId: v.id("transcriptions"),
-  },
+  args: { transcriptionId: v.id("transcriptions") },
   handler: async (ctx, args) => {
     const { transcriptionId } = args;
 
     try {
-      // Set ragStatus to processing
+      // Set ragStatus → processing
       await ctx.runMutation(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         "documentChunks:updateTranscriptionRagStatus" as any,
         { transcriptionId, ragStatus: "processing" }
       );
 
-      // Get transcription data
+      // Get transcription text
       const transcription = await ctx.runQuery(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         "transcriptions:getTranscription" as any,
         { id: transcriptionId }
       );
-
       if (!transcription || !transcription.transcript) {
         throw new Error("Transcription not found or has no text");
       }
 
-      // Chunk text
+      // Chunk + embed (all inline)
       const chunks = chunkText(transcription.transcript);
-      if (chunks.length === 0) {
-        throw new Error("No chunks generated from transcription");
-      }
+      if (chunks.length === 0) throw new Error("No chunks generated from transcription");
 
-      // Generate embeddings in batch
-      const embeddings = await ctx.runAction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "embeddings:generateEmbeddings" as any,
-        { texts: chunks }
-      );
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) throw new Error("OPENROUTER_API_KEY not configured");
+      const embeddings = await embedBatch(apiKey, chunks);
 
-      // Store chunks
-      for (let i = 0; i < chunks.length; i++) {
+      // Store in batches
+      for (let i = 0; i < chunks.length; i += CHUNK_BATCH_SIZE) {
+        const batch = chunks.slice(i, i + CHUNK_BATCH_SIZE).map((text, j) => ({
+          text,
+          embedding: embeddings[i + j],
+          sourceType: "transcription" as const,
+          sourceId: transcriptionId,
+          chunkIndex: i + j,
+          createdBy: transcription.createdBy,
+        }));
         await ctx.runMutation(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "documentChunks:storeChunk" as any,
-          {
-            text: chunks[i],
-            embedding: embeddings[i],
-            sourceType: "transcription",
-            sourceId: transcriptionId,
-            chunkIndex: i,
-            createdBy: transcription.createdBy,
-          }
+          "documentChunks:storeChunks" as any,
+          { chunks: batch }
         );
       }
 
-      // Set ragStatus to completed
+      // Set ragStatus → completed
       await ctx.runMutation(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         "documentChunks:updateTranscriptionRagStatus" as any,
         { transcriptionId, ragStatus: "completed" }
       );
 
-      console.log(
-        `[RAG] Processed transcription ${transcriptionId}: ${chunks.length} chunks`
-      );
-
+      console.log(`[RAG] Processed transcription ${transcriptionId}: ${chunks.length} chunks`);
       return { success: true, chunksCreated: chunks.length };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[RAG] Failed to process transcription ${transcriptionId}: ${msg}`
-      );
-
+      console.error(`[RAG] Failed to process transcription ${transcriptionId}: ${msg}`);
       try {
         await ctx.runMutation(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           "documentChunks:updateTranscriptionRagStatus" as any,
           { transcriptionId, ragStatus: "failed" }
         );
-      } catch {
-        // Ignore status update failure
-      }
-
+      } catch { /* ignore */ }
       return { success: false, error: msg };
     }
   },

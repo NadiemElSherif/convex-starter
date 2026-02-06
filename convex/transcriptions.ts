@@ -153,7 +153,7 @@ export const processTranscription = action({
             transcript = statusData.text;
           }
 
-          // Save transcript
+          // Save transcript (mutation schedules RAG processing)
           await ctx.runMutation(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             "transcriptions:completeTranscription" as any,
@@ -162,17 +162,6 @@ export const processTranscription = action({
               transcript,
             }
           );
-
-          // Chain RAG processing (fire-and-forget)
-          try {
-            await ctx.runAction(
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              "embeddings:processTranscription" as any,
-              { transcriptionId }
-            );
-          } catch (ragError) {
-            console.warn("[RAG] Failed to process transcription for RAG:", ragError);
-          }
 
           return { success: true, transcript };
         } else if (statusData.status === "failed") {
@@ -205,8 +194,17 @@ export const completeTranscription = mutation({
     await ctx.db.patch(args.id, {
       status: "completed",
       transcript: args.transcript,
+      ragStatus: "pending" as const,
       updatedAt: Date.now(),
     });
+
+    // Schedule RAG indexing server-side (decoupled from transcription action)
+    await ctx.scheduler.runAfter(
+      0,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      "embeddings:processTranscription" as any,
+      { transcriptionId: args.id }
+    );
   },
 });
 

@@ -37,8 +37,6 @@ export function FileUpload({
   const currentUser = useQuery(api.users.getCurrentUser);
   const generateUploadUrl = useAction(api.fileActions.generateUploadUrl);
   const storeFileMetadata = useMutation(api.files.storeFileMetadata);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const processDocument = useAction((api as any).embeddings.processDocument);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -101,17 +99,6 @@ export function FileUpload({
       });
 
       setProgress(100);
-
-      // Trigger RAG processing for document files (PDF, TXT, MD)
-      if (fileType === "document") {
-        const ext = file.name.toLowerCase().split(".").pop();
-        if (ext === "pdf" || ext === "txt" || ext === "md") {
-          processDocument({ fileMetadataId: fileId }).catch((err: unknown) =>
-            console.error("[RAG] Document processing failed:", err)
-          );
-        }
-      }
-
       onUploadComplete?.(fileId, result.storageKey);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
