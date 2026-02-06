@@ -100,15 +100,10 @@ export const sendMessage = action({
       }
     );
 
-    // Gather context from todos and transcriptions
+    // Gather context from todos
     const todos = await ctx.runQuery(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       "todos:list" as any,
-      {}
-    );
-    const transcriptions = await ctx.runQuery(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      "transcriptions:getTranscriptions" as any,
       {}
     );
 
@@ -126,19 +121,51 @@ export const sendMessage = action({
       context += "\n";
     }
 
-    if (Array.isArray(transcriptions) && transcriptions.length > 0) {
-      const completed = transcriptions.filter(
-        (t: { status: string }) => t.status === "completed"
+    // Vector search for relevant document/transcription chunks
+    try {
+      const user = await ctx.runQuery(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        "users:getCurrentUser" as any,
+        {}
       );
-      if (completed.length > 0) {
-        context += "## Transcriptions\n";
-        for (const t of completed) {
-          context += `### ${t.fileName}\n`;
-          if (t.transcript) {
-            context += t.transcript.slice(0, 2000) + "\n\n";
+
+      if (user) {
+        const queryEmbedding = await ctx.runAction(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "embeddings:generateEmbedding" as any,
+          { text: content }
+        );
+
+        const searchResults = await ctx.vectorSearch(
+          "documentChunks",
+          "by_embedding",
+          {
+            vector: queryEmbedding,
+            limit: 8,
+            filter: (q: any) => q.eq("createdBy", user._id), // eslint-disable-line @typescript-eslint/no-explicit-any
+          }
+        );
+
+        if (searchResults.length > 0) {
+          const chunkIds = searchResults.map((r: { _id: any }) => r._id); // eslint-disable-line @typescript-eslint/no-explicit-any
+          const chunks = await ctx.runQuery(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            "documentChunks:fetchChunksByIds" as any,
+            { ids: chunkIds }
+          );
+
+          if (Array.isArray(chunks) && chunks.length > 0) {
+            context += "## Relevant Documents\n";
+            for (const chunk of chunks) {
+              const label = chunk.sourceType === "transcription" ? "Transcription" : "Document";
+              context += `### ${label} (chunk ${chunk.chunkIndex + 1})\n`;
+              context += chunk.text + "\n\n";
+            }
           }
         }
       }
+    } catch (ragError) {
+      console.warn("[RAG] Vector search failed, continuing without document context:", ragError);
     }
 
     // Get conversation history
@@ -148,7 +175,7 @@ export const sendMessage = action({
       { conversationId }
     );
 
-    const systemPrompt = `You are a helpful assistant for a project management app. You have access to the user's todos and transcriptions as context. Answer questions about their data, help them plan, and provide useful insights.
+    const systemPrompt = `You are a helpful assistant for a project management app. You have access to the user's todos, documents, and transcriptions as context. Relevant document and transcription chunks are retrieved via semantic search. Answer questions about their data, help them plan, and provide useful insights.
 
 ${context ? "Here is the user's current data:\n\n" + context : "The user has no data yet."}`;
 

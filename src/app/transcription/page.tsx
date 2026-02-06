@@ -116,7 +116,7 @@ export default function TranscriptionPage() {
               No transcriptions yet. Upload an audio file above.
             </div>
           ) : (
-            transcriptions.map((t: { _id: string; status: string; fileName: string; transcript?: string; errorMessage?: string }) => (
+            transcriptions.map((t: { _id: string; status: string; fileName: string; transcript?: string; errorMessage?: string; ragStatus?: string }) => (
               <div
                 key={t._id}
                 className="bg-white rounded-lg border p-4"
@@ -125,6 +125,22 @@ export default function TranscriptionPage() {
                   <Badge className={statusColors[t.status]}>
                     {t.status}
                   </Badge>
+                  {t.status === "completed" && t.ragStatus && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        t.ragStatus === "completed"
+                          ? "bg-green-100 text-green-800 text-xs"
+                          : t.ragStatus === "processing"
+                            ? "bg-blue-100 text-blue-800 text-xs"
+                            : t.ragStatus === "failed"
+                              ? "bg-red-100 text-red-800 text-xs"
+                              : "bg-yellow-100 text-yellow-800 text-xs"
+                      }
+                    >
+                      {t.ragStatus === "completed" ? "Indexed" : t.ragStatus === "processing" ? "Indexing..." : t.ragStatus === "failed" ? "Index failed" : "Index pending"}
+                    </Badge>
+                  )}
                   <p className="font-medium text-gray-900 flex-1 truncate">
                     {t.fileName}
                   </p>

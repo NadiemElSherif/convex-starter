@@ -36,7 +36,7 @@ const features = [
   },
   {
     title: "RAG Chat",
-    description: "Chat with an AI that has context from your todos and transcriptions.",
+    description: "Chat with an AI that uses vector search across your documents, transcriptions, and todos.",
     href: "/chat",
     icon: MessageSquare,
     color: "text-orange-600 bg-orange-100",

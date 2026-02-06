@@ -2,7 +2,7 @@ import { action } from "./_generated/server";
 import { v } from "convex/values";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "mistralai/devstral-2512:free";
+const DEFAULT_MODEL = "google/gemini-3-flash-preview";
 const TIMEOUT_MS = 60000;
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
@@ -49,8 +49,8 @@ export const callLLM = action({
         if (response.usage) {
           console.log(
             `[OpenRouter] Tokens used: ${response.usage.total_tokens} ` +
-              `(prompt: ${response.usage.prompt_tokens}, ` +
-              `completion: ${response.usage.completion_tokens})`
+            `(prompt: ${response.usage.prompt_tokens}, ` +
+            `completion: ${response.usage.completion_tokens})`
           );
         }
 
@@ -88,7 +88,7 @@ export const callLLM = action({
         if (attempt < MAX_RETRIES - 1) {
           console.warn(
             `[OpenRouter] Attempt ${attempt + 1} failed: ${error}. ` +
-              `Retrying in ${delay}ms...`
+            `Retrying in ${delay}ms...`
           );
 
           await sleep(delay);

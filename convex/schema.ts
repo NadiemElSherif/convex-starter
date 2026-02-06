@@ -40,6 +40,14 @@ export default defineSchema({
       v.literal("document"),
       v.literal("image")
     ),
+    ragStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("processing"),
+        v.literal("completed"),
+        v.literal("failed")
+      )
+    ),
     createdBy: v.id("users"),
     createdAt: v.number(),
   })
@@ -56,6 +64,14 @@ export default defineSchema({
     ),
     transcript: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
+    ragStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("processing"),
+        v.literal("completed"),
+        v.literal("failed")
+      )
+    ),
     createdBy: v.id("users"),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -73,4 +89,20 @@ export default defineSchema({
   })
     .index("by_conversation", ["conversationId"])
     .index("by_created_by", ["createdBy"]),
+
+  documentChunks: defineTable({
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    sourceType: v.union(v.literal("document"), v.literal("transcription")),
+    sourceId: v.string(),
+    chunkIndex: v.number(),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  })
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,
+      filterFields: ["createdBy"],
+    })
+    .index("by_source", ["sourceId"]),
 });

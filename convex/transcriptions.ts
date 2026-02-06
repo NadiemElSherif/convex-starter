@@ -163,6 +163,17 @@ export const processTranscription = action({
             }
           );
 
+          // Chain RAG processing (fire-and-forget)
+          try {
+            await ctx.runAction(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              "embeddings:processTranscription" as any,
+              { transcriptionId }
+            );
+          } catch (ragError) {
+            console.warn("[RAG] Failed to process transcription for RAG:", ragError);
+          }
+
           return { success: true, transcript };
         } else if (statusData.status === "failed") {
           throw new Error(statusData.error || "Transcription failed");

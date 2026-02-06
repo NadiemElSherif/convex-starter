@@ -113,7 +113,7 @@ export default function ChatPage() {
               )}
             </div>
             <div className="p-3 border-t text-xs text-gray-400">
-              Uses your todos & transcriptions as context
+              Uses your todos, documents & transcriptions as context
             </div>
           </div>
 

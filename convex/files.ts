@@ -52,6 +52,16 @@ export const deleteFile = mutation({
   },
   handler: async (ctx, args) => {
     await requireAuth(ctx);
+
+    // Delete associated document chunks
+    const chunks = await ctx.db
+      .query("documentChunks")
+      .withIndex("by_source", (q) => q.eq("sourceId", args.fileId))
+      .collect();
+    for (const chunk of chunks) {
+      await ctx.db.delete(chunk._id);
+    }
+
     await ctx.db.delete(args.fileId);
   },
 });

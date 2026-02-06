@@ -37,6 +37,8 @@ export function FileUpload({
   const currentUser = useQuery(api.users.getCurrentUser);
   const generateUploadUrl = useAction(api.fileActions.generateUploadUrl);
   const storeFileMetadata = useMutation(api.files.storeFileMetadata);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const processDocument = useAction((api as any).embeddings.processDocument);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -99,6 +101,17 @@ export function FileUpload({
       });
 
       setProgress(100);
+
+      // Trigger RAG processing for document files (PDF, TXT, MD)
+      if (fileType === "document") {
+        const ext = file.name.toLowerCase().split(".").pop();
+        if (ext === "pdf" || ext === "txt" || ext === "md") {
+          processDocument({ fileMetadataId: fileId }).catch((err: unknown) =>
+            console.error("[RAG] Document processing failed:", err)
+          );
+        }
+      }
+
       onUploadComplete?.(fileId, result.storageKey);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -128,28 +141,25 @@ export function FileUpload({
             className="hidden"
             id="file-upload"
           />
-          <label htmlFor="file-upload">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={disabled || uploading}
-              className="w-full border-dashed border-2 hover:bg-gray-50"
-              onClick={() => document.getElementById("file-upload")?.click()}
-              asChild
-            >
-              <span className="flex items-center gap-2 py-8">
-                <Upload className="h-8 w-8 text-gray-400" />
-                <div className="text-left">
-                  <div className="font-medium text-gray-900">
-                    Upload {fileType} file
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    Max 100MB
-                  </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled || uploading}
+            className="w-full border-dashed border-2 hover:bg-gray-50 h-auto py-8"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <span className="flex items-center gap-2">
+              <Upload className="h-8 w-8 text-gray-400" />
+              <div className="text-left">
+                <div className="font-medium text-gray-900">
+                  Upload {fileType} file
                 </div>
-              </span>
-            </Button>
-          </label>
+                <div className="text-sm text-gray-500">
+                  Max 100MB
+                </div>
+              </div>
+            </span>
+          </Button>
           {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
         </div>
       ) : (

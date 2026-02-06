@@ -23,6 +23,13 @@ const fileTypeColors: Record<string, string> = {
   image: "bg-green-100 text-green-800",
 };
 
+const ragStatusConfig: Record<string, { label: string; className: string }> = {
+  pending: { label: "Indexing pending", className: "bg-yellow-100 text-yellow-800" },
+  processing: { label: "Indexing...", className: "bg-blue-100 text-blue-800" },
+  completed: { label: "Indexed", className: "bg-green-100 text-green-800" },
+  failed: { label: "Index failed", className: "bg-red-100 text-red-800" },
+};
+
 export default function UploadsPage() {
   const files = useQuery(api.files.getMyFiles);
   const deleteFile = useMutation(api.files.deleteFile);
@@ -73,7 +80,10 @@ export default function UploadsPage() {
               No files uploaded yet.
             </div>
           ) : (
-            files.map((file) => (
+            files.map((file) => {
+              // ragStatus is optional and added via schema migration
+              const ragStatus = (file as Record<string, unknown>).ragStatus as string | undefined;
+              return (
               <div
                 key={file._id}
                 className="bg-white rounded-lg border p-4 flex items-center gap-3"
@@ -83,9 +93,19 @@ export default function UploadsPage() {
                 </Badge>
 
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">
-                    {file.fileName}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-gray-900 truncate">
+                      {file.fileName}
+                    </p>
+                    {ragStatus && ragStatusConfig[ragStatus] && (
+                      <Badge
+                        variant="outline"
+                        className={ragStatusConfig[ragStatus].className + " text-xs shrink-0"}
+                      >
+                        {ragStatusConfig[ragStatus].label}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500">
                     {formatFileSize(file.size)} &middot;{" "}
                     {new Date(file.createdAt).toLocaleDateString()}
@@ -111,7 +131,8 @@ export default function UploadsPage() {
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
