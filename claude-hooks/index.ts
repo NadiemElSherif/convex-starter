@@ -316,10 +316,13 @@ async function main() {
     return;
   }
 
-  // All checks passed — update diagrams if needed
+  // All checks passed — update diagrams if needed, then commit
   const affectedDiagrams = getAffectedDiagrams(changedFiles, input.cwd);
   const diagramDir = join(input.cwd, DIAGRAM_DIR);
   const diagramsExist = existsSync(diagramDir);
+
+  const commitPrompt =
+    "Generate a concise commit message for the staged changes. Do not commit anything sensitive like .env files. Stage and commit.";
 
   if (affectedDiagrams.length > 0) {
     const existingDiagrams = diagramsExist
@@ -330,7 +333,7 @@ async function main() {
       : affectedDiagrams;
 
     console.error(
-      `Diagrams needing update: ${affectedDiagrams.join(", ")}. Spawning diagram updater...`
+      `Diagrams needing update: ${affectedDiagrams.join(", ")}. Spawning diagram updater then commit...`
     );
 
     const diagramPrompt = [
@@ -348,9 +351,31 @@ async function main() {
       .filter(Boolean)
       .join(" ");
 
+    // Chain: sonnet updates diagrams, then haiku commits everything
+    const child = spawn(
+      "bash",
+      [
+        "-c",
+        'claude -p --model sonnet "$DIAGRAM_PROMPT" && claude -p --model haiku "$COMMIT_PROMPT"',
+      ],
+      {
+        cwd: input.cwd,
+        stdio: "ignore",
+        detached: true,
+        env: {
+          ...process.env,
+          DIAGRAM_PROMPT: diagramPrompt,
+          COMMIT_PROMPT: commitPrompt,
+        },
+      }
+    );
+    child.unref();
+  } else {
+    // No diagrams affected — just commit
+    console.error("All checks passed. Spawning background commit...");
     const child = spawn(
       "claude",
-      ["-p", "--model", "sonnet", diagramPrompt],
+      ["-p", "--model", "haiku", commitPrompt],
       {
         cwd: input.cwd,
         stdio: "ignore",
@@ -358,8 +383,6 @@ async function main() {
       }
     );
     child.unref();
-  } else {
-    console.error("All checks passed.");
   }
 }
 
