@@ -1,0 +1,261 @@
+import { spawn } from "child_process";
+import { readFileSync, readdirSync } from "fs";
+import { join } from "path";
+
+interface HookInput {
+  session_id: string;
+  transcript_path: string;
+  cwd: string;
+  hook_event_name: string;
+}
+
+interface TranscriptMessage {
+  role: string;
+  content: unknown;
+}
+
+interface ToolUseBlock {
+  type: "tool_use";
+  name: string;
+  input: Record<string, unknown>;
+}
+
+function getChangedFiles(transcriptPath: string): string[] {
+  const changed = new Set<string>();
+  try {
+    const raw = readFileSync(transcriptPath, "utf-8");
+    const messages: TranscriptMessage[] = JSON.parse(raw);
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+      for (const block of msg.content) {
+        const b = block as ToolUseBlock;
+        if (b.type !== "tool_use") continue;
+        if (b.name === "Write" || b.name === "Edit") {
+          const fp = b.input?.file_path as string | undefined;
+          if (fp) changed.add(fp);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Failed to read transcript:", e);
+  }
+  return Array.from(changed);
+}
+
+function runCommand(
+  cmd: string,
+  args: string[],
+  cwd: string
+): Promise<{ code: number; output: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    proc.stdout.on("data", (d: Buffer) => {
+      output += d.toString();
+    });
+    proc.stderr.on("data", (d: Buffer) => {
+      output += d.toString();
+    });
+    proc.on("close", (code) => {
+      resolve({ code: code ?? 1, output });
+    });
+  });
+}
+
+// Client-only packages that should never appear in convex/ server code
+const CLIENT_ONLY_PACKAGES = [
+  "react",
+  "react-dom",
+  "next",
+  "@clerk/nextjs",
+  "@radix-ui",
+  "lucide-react",
+  "class-variance-authority",
+  "clsx",
+  "tailwind-merge",
+  "tailwindcss",
+];
+
+function checkUnusedGeneratedImports(cwd: string): string[] {
+  const convexDir = join(cwd, "convex");
+  const errors: string[] = [];
+
+  let files: string[];
+  try {
+    files = readdirSync(convexDir).filter(
+      (f) => f.endsWith(".ts") && !f.endsWith(".d.ts") && f !== "tsconfig.json"
+    );
+  } catch {
+    return [];
+  }
+
+  for (const file of files) {
+    const filePath = join(convexDir, file);
+    let content: string;
+    try {
+      content = readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    // Find all imports from _generated
+    const importRegex =
+      /import\s+\{([^}]+)\}\s+from\s+["']\.?\/?_generated\/\w+["'];?/g;
+    let match: RegExpExecArray | null;
+    while ((match = importRegex.exec(content)) !== null) {
+      const importedNames = match[1]
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      // Strip "type" keyword and handle "as alias" renames
+      const resolvedNames = importedNames.map((name) => {
+        let n = name.replace(/^type\s+/, "");
+        const asMatch = n.match(/^\S+\s+as\s+(\S+)$/);
+        if (asMatch) n = asMatch[1];
+        return n;
+      });
+
+      // Check each name is used somewhere beyond the import line itself
+      const contentWithoutImportLine = content.replace(match[0], "");
+      for (const name of resolvedNames) {
+        // Word-boundary check: the name must appear as its own token
+        const usageRegex = new RegExp(`\\b${name}\\b`);
+        if (!usageRegex.test(contentWithoutImportLine)) {
+          errors.push(`convex/${file}: unused import "${name}" from _generated`);
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+function checkClientImportsInConvex(cwd: string): string[] {
+  const convexDir = join(cwd, "convex");
+  const errors: string[] = [];
+
+  let files: string[];
+  try {
+    files = readdirSync(convexDir).filter(
+      (f) => f.endsWith(".ts") && !f.endsWith(".d.ts")
+    );
+  } catch {
+    return [];
+  }
+
+  for (const file of files) {
+    const filePath = join(convexDir, file);
+    let content: string;
+    try {
+      content = readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    // Match import statements and check the source against banned packages
+    const importRegex = /import\s+.*?\s+from\s+["']([^"']+)["']/g;
+    let match: RegExpExecArray | null;
+    while ((match = importRegex.exec(content)) !== null) {
+      const source = match[1];
+      for (const pkg of CLIENT_ONLY_PACKAGES) {
+        if (source === pkg || source.startsWith(pkg + "/")) {
+          errors.push(
+            `convex/${file}: imports client-only package "${source}"`
+          );
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+function block(reason: string): void {
+  console.log(JSON.stringify({ decision: "block", reason }));
+}
+
+async function main() {
+  // Read hook input from stdin
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
+  }
+  const input: HookInput = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+  // Only act on Stop events
+  if (input.hook_event_name !== "Stop") return;
+
+  const changedFiles = getChangedFiles(input.transcript_path);
+  if (changedFiles.length === 0) return;
+
+  // --- Check 1: TypeScript typecheck ---
+  console.error("Running TypeScript typecheck...");
+  const tsResult = await runCommand("bun", ["run", "typecheck"], input.cwd);
+  if (tsResult.code !== 0) {
+    block(`TypeScript errors found. Please fix them:\n${tsResult.output}`);
+    return;
+  }
+
+  // --- Check 2: Convex typecheck (schema vs function signatures) ---
+  console.error("Running Convex typecheck...");
+  const convexResult = await runCommand(
+    "bunx",
+    ["convex", "typecheck"],
+    input.cwd
+  );
+  if (convexResult.code !== 0) {
+    block(
+      `Convex typecheck failed. Please fix the function signature / schema errors:\n${convexResult.output}`
+    );
+    return;
+  }
+
+  // --- Check 3: Unused _generated imports ---
+  console.error("Checking for unused _generated imports...");
+  const unusedImports = checkUnusedGeneratedImports(input.cwd);
+  if (unusedImports.length > 0) {
+    block(
+      `Unused imports from convex/_generated found. Please remove them:\n${unusedImports.join("\n")}`
+    );
+    return;
+  }
+
+  // --- Check 4: Client-only packages in server code ---
+  console.error("Checking for client-only imports in convex/...");
+  const clientImports = checkClientImportsInConvex(input.cwd);
+  if (clientImports.length > 0) {
+    block(
+      `Client-only packages imported in server-side Convex code. Please remove them:\n${clientImports.join("\n")}`
+    );
+    return;
+  }
+
+  // All checks passed — spawn background auto-commit agent
+  console.error("All checks passed. Spawning background commit agent...");
+  const commitPrompt = [
+    "Generate a concise commit message for the staged changes.",
+    "Do not commit anything sensitive like .env files.",
+    "Stage and commit.",
+  ].join(" ");
+
+  const child = spawn(
+    "claude",
+    ["-p", "--model", "haiku", commitPrompt],
+    {
+      cwd: input.cwd,
+      stdio: "ignore",
+      detached: true,
+    }
+  );
+  child.unref();
+}
+
+main().catch((e) => {
+  console.error("Hook error:", e);
+  process.exit(0); // Don't block on hook errors
+});
