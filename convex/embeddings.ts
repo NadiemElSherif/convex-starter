@@ -2,8 +2,7 @@
 
 import { action } from "./_generated/server";
 import { v } from "convex/values";
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse");
+import { extractText as extractPdfText } from "unpdf";
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
@@ -67,14 +66,14 @@ function chunkText(text: string): string[] {
   return chunks.filter((c) => c.length > 20);
 }
 
-async function extractText(
+async function extractTextFromFile(
   buffer: Buffer,
   mimeType: string,
   fileName: string
 ): Promise<string> {
   if (mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf")) {
-    const result = await pdfParse(buffer);
-    return result.text;
+    const { text } = await extractPdfText(new Uint8Array(buffer));
+    return text.join("\n");
   }
   // Plain text, markdown, etc.
   return buffer.toString("utf-8");
@@ -188,7 +187,7 @@ export const processDocument = action({
       const buffer = Buffer.from(arrayBuffer);
 
       // Extract text
-      const text = await extractText(buffer, file.mimeType, file.fileName);
+      const text = await extractTextFromFile(buffer, file.mimeType, file.fileName);
       if (!text.trim()) {
         throw new Error("No text content extracted from file");
       }
