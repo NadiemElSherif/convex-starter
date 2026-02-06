@@ -26,6 +26,16 @@ This project has a comprehensive set of Convex skills. **Always invoke the relev
 | Production patterns, error handling, organization | `/convex-best-practices` |
 | General / unsure which skill | `/convex` (routes to the right one) |
 
+**Other skills:**
+
+| Task | Skill to invoke |
+|------|----------------|
+| Browser testing, form filling, screenshots, web interaction | `/agent-browser` |
+| Building polished UI components and pages | `/frontend-design` |
+| Preventing scope creep during development | `/avoid-feature-creep` |
+
+Use `/agent-browser` whenever you need to visually verify the app in a browser, test a flow end-to-end, fill out forms, take screenshots, or extract data from a web page.
+
 **Fallback:** If skills don't cover an edge case, use `mcp__zread__search_doc(repo_name="get-convex/convex-backend", query="...")` to search the Convex source repo directly.
 
 ### Convex Runtime Rules
