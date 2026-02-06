@@ -26,6 +26,22 @@ This project has a comprehensive set of Convex skills. **Always invoke the relev
 | Production patterns, error handling, organization | `/convex-best-practices` |
 | General / unsure which skill | `/convex` (routes to the right one) |
 
+**Expo skills (REQUIRED when doing any Expo/React Native work):**
+
+Before writing or modifying any Expo or React Native code, you MUST invoke the appropriate Expo skill to get the correct patterns.
+
+| Task | Skill to invoke |
+|------|----------------|
+| Building UI with Expo Router (styling, components, navigation, animations, native tabs) | `/building-native-ui` |
+| Building dev clients, local builds, TestFlight distribution | `/expo-dev-client` |
+| Creating API routes in Expo Router with EAS Hosting | `/expo-api-routes` |
+| Deploying to App Store, Play Store, web hosting | `/expo-deployment` |
+| CI/CD, EAS workflows, build pipelines | `/expo-cicd-workflows` |
+| Upgrading Expo SDK versions, fixing dependency issues | `/upgrading-expo` |
+| Setting up Tailwind CSS / NativeWind in Expo | `/expo-tailwind-setup` |
+| Using DOM components (web code in native webview) | `/use-dom` |
+| Network requests, API calls, data fetching, caching | `/native-data-fetching` |
+
 **Other skills:**
 
 | Task | Skill to invoke |
