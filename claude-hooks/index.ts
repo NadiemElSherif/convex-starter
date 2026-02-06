@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { readFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
 interface HookInput {
@@ -175,6 +175,70 @@ function checkClientImportsInConvex(cwd: string): string[] {
   return errors;
 }
 
+// --- Diagram maintenance ---
+
+const DIAGRAM_DIR = "memory/ai/diagrams";
+
+interface DiagramMapping {
+  diagram: string;
+  patterns: RegExp[];
+}
+
+const DIAGRAM_MAPPINGS: DiagramMapping[] = [
+  {
+    diagram: "schema.md",
+    patterns: [/convex\/schema\.ts$/],
+  },
+  {
+    diagram: "functions.md",
+    patterns: [/convex\/[^/]+\.ts$/],
+  },
+  {
+    diagram: "auth-flow.md",
+    patterns: [
+      /convex\/auth\.ts$/,
+      /convex\/auth\.config\.ts$/,
+      /convex\/users\.ts$/,
+      /src\/middleware\.ts$/,
+      /src\/components\/providers\.tsx$/,
+      /src\/app\/sign-in\//,
+      /src\/app\/sign-up\//,
+    ],
+  },
+  {
+    diagram: "user-journeys.md",
+    patterns: [
+      /src\/app\/[^/]+\/page\.tsx$/,
+      /src\/components\/[^/]+\.tsx$/,
+      /convex\/[^/]+\.ts$/,
+    ],
+  },
+  {
+    diagram: "data-flow.md",
+    patterns: [
+      /convex\/[^/]+\.ts$/,
+      /src\/app\/[^/]+\/page\.tsx$/,
+      /src\/components\/[^/]+\.tsx$/,
+    ],
+  },
+];
+
+function getAffectedDiagrams(changedFiles: string[], cwd: string): string[] {
+  const affected = new Set<string>();
+  for (const file of changedFiles) {
+    const rel = file.startsWith(cwd) ? file.slice(cwd.length + 1) : file;
+    for (const mapping of DIAGRAM_MAPPINGS) {
+      for (const pattern of mapping.patterns) {
+        if (pattern.test(rel)) {
+          affected.add(mapping.diagram);
+          break;
+        }
+      }
+    }
+  }
+  return Array.from(affected);
+}
+
 function block(reason: string): void {
   console.log(JSON.stringify({ decision: "block", reason }));
 }
@@ -235,24 +299,74 @@ async function main() {
     return;
   }
 
-  // All checks passed — spawn background auto-commit agent
-  console.error("All checks passed. Spawning background commit agent...");
-  const commitPrompt = [
-    "Generate a concise commit message for the staged changes.",
-    "Do not commit anything sensitive like .env files.",
-    "Stage and commit.",
-  ].join(" ");
+  // All checks passed — check if diagrams need updating, then commit
+  const affectedDiagrams = getAffectedDiagrams(changedFiles, input.cwd);
+  const diagramDir = join(input.cwd, DIAGRAM_DIR);
+  const diagramsExist = existsSync(diagramDir);
 
-  const child = spawn(
-    "claude",
-    ["-p", "--model", "haiku", commitPrompt],
-    {
-      cwd: input.cwd,
-      stdio: "ignore",
-      detached: true,
-    }
-  );
-  child.unref();
+  const commitPrompt =
+    "Generate a concise commit message for the staged changes. Do not commit anything sensitive like .env files. Stage and commit.";
+
+  if (affectedDiagrams.length > 0) {
+    const existingDiagrams = diagramsExist
+      ? affectedDiagrams.filter((d) => existsSync(join(diagramDir, d)))
+      : [];
+    const missingDiagrams = diagramsExist
+      ? affectedDiagrams.filter((d) => !existsSync(join(diagramDir, d)))
+      : affectedDiagrams;
+
+    console.error(
+      `Diagrams needing update: ${affectedDiagrams.join(", ")}. Spawning diagram updater then commit agent...`
+    );
+
+    const diagramPrompt = [
+      `The following source files were changed: ${changedFiles.join(", ")}.`,
+      existingDiagrams.length > 0
+        ? `UPDATE these existing mermaid diagrams in ${DIAGRAM_DIR}/: ${existingDiagrams.join(", ")}. Read each diagram file first, then read the changed source files, and edit only the parts that need updating to reflect the current code.`
+        : "",
+      missingDiagrams.length > 0
+        ? `CREATE these missing diagrams in ${DIAGRAM_DIR}/: ${missingDiagrams.join(", ")}. Read the relevant source files and generate complete mermaid diagrams in markdown.`
+        : "",
+      `Also consider if the changes introduce something that should be in a NEW diagram not yet listed (e.g., a new integration, a new pipeline, a new auth provider). If so, create it in ${DIAGRAM_DIR}/.`,
+      `Use mermaid syntax inside markdown code blocks. Prioritize completeness for AI consumption — include every edge case and conditional path.`,
+      `Do NOT stage or commit anything — only update/create diagram files.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    // Chain: sonnet updates diagrams, then haiku commits everything
+    const child = spawn(
+      "bash",
+      [
+        "-c",
+        'claude -p --model sonnet "$DIAGRAM_PROMPT" && claude -p --model haiku "$COMMIT_PROMPT"',
+      ],
+      {
+        cwd: input.cwd,
+        stdio: "ignore",
+        detached: true,
+        env: {
+          ...process.env,
+          DIAGRAM_PROMPT: diagramPrompt,
+          COMMIT_PROMPT: commitPrompt,
+        },
+      }
+    );
+    child.unref();
+  } else {
+    // No diagrams affected — just commit
+    console.error("All checks passed. Spawning background commit agent...");
+    const child = spawn(
+      "claude",
+      ["-p", "--model", "haiku", commitPrompt],
+      {
+        cwd: input.cwd,
+        stdio: "ignore",
+        detached: true,
+      }
+    );
+    child.unref();
+  }
 }
 
 main().catch((e) => {
