@@ -1,6 +1,8 @@
 import { action, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { requireAuth } from "./auth";
+import { generateSingleEmbedding, callLLMHelper } from "./openrouter";
 
 export const getConversations = query({
   args: {},
@@ -45,8 +47,9 @@ export const getConversation = query({
     conversationId: v.string(),
   },
   handler: async (ctx, args) => {
+    let user;
     try {
-      await requireAuth(ctx);
+      user = await requireAuth(ctx);
     } catch {
       return [];
     }
@@ -58,7 +61,10 @@ export const getConversation = query({
       )
       .collect();
 
-    return messages.sort((a, b) => a.createdAt - b.createdAt);
+    // Only return messages owned by the current user
+    const ownMessages = messages.filter((m) => m.createdBy === user._id);
+
+    return ownMessages.sort((a, b) => a.createdAt - b.createdAt);
   },
 });
 
@@ -130,11 +136,8 @@ export const sendMessage = action({
       );
 
       if (user) {
-        const queryEmbedding = await ctx.runAction(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "embeddings:generateEmbedding" as any,
-          { text: content }
-        );
+        // Inline embedding call (no action-to-action)
+        const queryEmbedding = await generateSingleEmbedding(content);
 
         const searchResults = await ctx.vectorSearch(
           "documentChunks",
@@ -149,8 +152,7 @@ export const sendMessage = action({
         if (searchResults.length > 0) {
           const chunkIds = searchResults.map((r: { _id: any }) => r._id); // eslint-disable-line @typescript-eslint/no-explicit-any
           const chunks = await ctx.runQuery(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            "documentChunks:fetchChunksByIds" as any,
+            internal.documentChunks.fetchChunksByIds,
             { ids: chunkIds }
           );
 
@@ -190,23 +192,19 @@ ${context ? "Here is the user's current data:\n\n" + context : "The user has no 
     }
     prompt += `User: ${content}`;
 
-    // Call LLM
-    const response = await ctx.runAction(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      "llm:callLLM" as any,
-      {
-        prompt,
-        systemPrompt,
-        maxTokens: 2048,
-      }
-    );
+    // Inline LLM call (no action-to-action)
+    const response = await callLLMHelper({
+      prompt,
+      systemPrompt,
+      maxTokens: 2048,
+    });
 
     // Store assistant response
     await ctx.runMutation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       "chat:storeMessage" as any,
       {
-        content: response as string,
+        content: response,
         role: "assistant",
         conversationId,
       }

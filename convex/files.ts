@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { requireAuth } from "./auth";
 
@@ -38,8 +39,7 @@ export const storeFileMetadata = mutation({
     if (shouldIndex) {
       await ctx.scheduler.runAfter(
         0,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "embeddings:processDocument" as any,
+        internal.embeddings.processDocument,
         { fileMetadataId: fileId }
       );
     }
@@ -68,7 +68,13 @@ export const deleteFile = mutation({
     fileId: v.id("fileMetadata"),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
+    const user = await requireAuth(ctx);
+
+    const file = await ctx.db.get(args.fileId);
+    if (!file) throw new Error("File not found");
+    if (file.createdBy !== user._id) {
+      throw new Error("Not authorized to delete this file");
+    }
 
     // Delete associated document chunks
     const chunks = await ctx.db

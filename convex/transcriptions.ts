@@ -1,4 +1,5 @@
-import { action, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { requireAuth } from "./auth";
 
@@ -64,7 +65,7 @@ export const getTranscriptions = query({
   },
 });
 
-export const getTranscription = query({
+export const getTranscription = internalQuery({
   args: {
     id: v.id("transcriptions"),
   },
@@ -90,8 +91,7 @@ export const processTranscription = action({
     try {
       // Mark as processing
       await ctx.runMutation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "transcriptions:_updateStatus" as any,
+        internal.transcriptions._updateStatus,
         {
           id: transcriptionId,
           status: "processing",
@@ -124,8 +124,7 @@ export const processTranscription = action({
       if (submitData.code === 200 && submitData.response?.text) {
         const transcript = submitData.response.text;
         await ctx.runMutation(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "transcriptions:completeTranscription" as any,
+          internal.transcriptions.completeTranscription,
           { id: transcriptionId, transcript }
         );
         return { success: true, transcript };
@@ -171,8 +170,7 @@ export const processTranscription = action({
 
           // Save transcript (mutation schedules RAG processing)
           await ctx.runMutation(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            "transcriptions:completeTranscription" as any,
+            internal.transcriptions.completeTranscription,
             { id: transcriptionId, transcript }
           );
 
@@ -186,8 +184,7 @@ export const processTranscription = action({
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       await ctx.runMutation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "transcriptions:failTranscription" as any,
+        internal.transcriptions.failTranscription,
         {
           id: transcriptionId,
           errorMessage: msg,
@@ -198,7 +195,7 @@ export const processTranscription = action({
   },
 });
 
-export const completeTranscription = mutation({
+export const completeTranscription = internalMutation({
   args: {
     id: v.id("transcriptions"),
     transcript: v.string(),
@@ -214,14 +211,13 @@ export const completeTranscription = mutation({
     // Schedule RAG indexing server-side (decoupled from transcription action)
     await ctx.scheduler.runAfter(
       0,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      "embeddings:processTranscription" as any,
+      internal.embeddings.processTranscription,
       { transcriptionId: args.id }
     );
   },
 });
 
-export const failTranscription = mutation({
+export const failTranscription = internalMutation({
   args: {
     id: v.id("transcriptions"),
     errorMessage: v.string(),
@@ -235,7 +231,7 @@ export const failTranscription = mutation({
   },
 });
 
-export const _updateStatus = mutation({
+export const _updateStatus = internalMutation({
   args: {
     id: v.id("transcriptions"),
     status: v.union(

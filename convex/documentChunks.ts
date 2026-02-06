@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 
 const chunkSchema = v.object({
@@ -10,7 +10,7 @@ const chunkSchema = v.object({
   createdBy: v.id("users"),
 });
 
-export const storeChunks = mutation({
+export const storeChunks = internalMutation({
   args: {
     chunks: v.array(chunkSchema),
   },
@@ -31,7 +31,7 @@ export const storeChunks = mutation({
   },
 });
 
-export const fetchChunksByIds = query({
+export const fetchChunksByIds = internalQuery({
   args: {
     ids: v.array(v.id("documentChunks")),
   },
@@ -53,7 +53,7 @@ export const fetchChunksByIds = query({
   },
 });
 
-export const deleteChunksBySource = mutation({
+export const deleteChunksBySource = internalMutation({
   args: {
     sourceId: v.string(),
   },
@@ -69,7 +69,7 @@ export const deleteChunksBySource = mutation({
   },
 });
 
-export const updateFileRagStatus = mutation({
+export const updateFileRagStatus = internalMutation({
   args: {
     fileId: v.id("fileMetadata"),
     ragStatus: v.union(
@@ -84,7 +84,7 @@ export const updateFileRagStatus = mutation({
   },
 });
 
-export const updateTranscriptionRagStatus = mutation({
+export const updateTranscriptionRagStatus = internalMutation({
   args: {
     transcriptionId: v.id("transcriptions"),
     ragStatus: v.union(
@@ -99,7 +99,7 @@ export const updateTranscriptionRagStatus = mutation({
   },
 });
 
-export const getFileMetadata = query({
+export const getFileMetadata = internalQuery({
   args: {
     fileId: v.id("fileMetadata"),
   },

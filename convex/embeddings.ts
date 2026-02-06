@@ -1,12 +1,12 @@
 "use node";
 
-import { action } from "./_generated/server";
+import { internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { extractText as extractPdfText } from "unpdf";
 import * as Minio from "minio";
+import { embedBatch } from "./openrouter";
 
-const EMBEDDING_MODEL = "openai/text-embedding-3-small";
-const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const CHUNK_BATCH_SIZE = 15; // chunks per storeChunks mutation (stay under 1MB arg limit)
 
 // --- MinIO helpers (mirrors fileActions.ts) ---
@@ -93,59 +93,9 @@ async function extractTextFromFile(
   return buffer.toString("utf-8");
 }
 
-// --- Embedding API (called directly, not via action) ---
+// --- Processing pipelines (scheduled by mutations) ---
 
-async function callEmbeddingAPI(
-  apiKey: string,
-  input: string | string[]
-): Promise<number[][]> {
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://convex-starter.app",
-      "X-Title": "Convex Starter",
-    },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Embedding API error: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  return data.data.map((item: { embedding: number[] }) => item.embedding);
-}
-
-async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
-  if (texts.length === 0) return [];
-  const API_BATCH = 20;
-  const all: number[][] = [];
-  for (let i = 0; i < texts.length; i += API_BATCH) {
-    const batch = texts.slice(i, i + API_BATCH);
-    const embeddings = await callEmbeddingAPI(apiKey, batch);
-    all.push(...embeddings);
-  }
-  return all;
-}
-
-// --- Single embedding action (used by chat for query embedding) ---
-
-export const generateEmbedding = action({
-  args: { text: v.string() },
-  handler: async (_ctx, args) => {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY not configured");
-    const embeddings = await callEmbeddingAPI(apiKey, args.text);
-    return embeddings[0];
-  },
-});
-
-// --- Processing pipelines (scheduled by mutations, no action-to-action) ---
-
-export const processDocument = action({
+export const processDocument = internalAction({
   args: { fileMetadataId: v.id("fileMetadata") },
   handler: async (ctx, args) => {
     const { fileMetadataId } = args;
@@ -153,15 +103,13 @@ export const processDocument = action({
     try {
       // Set ragStatus → processing
       await ctx.runMutation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "documentChunks:updateFileRagStatus" as any,
+        internal.documentChunks.updateFileRagStatus,
         { fileId: fileMetadataId, ragStatus: "processing" }
       );
 
       // Get file metadata
       const file = await ctx.runQuery(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "documentChunks:getFileMetadata" as any,
+        internal.documentChunks.getFileMetadata,
         { fileId: fileMetadataId }
       );
       if (!file) throw new Error("File metadata not found");
@@ -197,16 +145,14 @@ export const processDocument = action({
           createdBy: file.createdBy,
         }));
         await ctx.runMutation(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "documentChunks:storeChunks" as any,
+          internal.documentChunks.storeChunks,
           { chunks: batch }
         );
       }
 
       // Set ragStatus → completed
       await ctx.runMutation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "documentChunks:updateFileRagStatus" as any,
+        internal.documentChunks.updateFileRagStatus,
         { fileId: fileMetadataId, ragStatus: "completed" }
       );
 
@@ -217,8 +163,7 @@ export const processDocument = action({
       console.error(`[RAG] Failed to process document ${fileMetadataId}: ${msg}`);
       try {
         await ctx.runMutation(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "documentChunks:updateFileRagStatus" as any,
+          internal.documentChunks.updateFileRagStatus,
           { fileId: fileMetadataId, ragStatus: "failed" }
         );
       } catch { /* ignore */ }
@@ -227,7 +172,7 @@ export const processDocument = action({
   },
 });
 
-export const processTranscription = action({
+export const processTranscription = internalAction({
   args: { transcriptionId: v.id("transcriptions") },
   handler: async (ctx, args) => {
     const { transcriptionId } = args;
@@ -235,15 +180,13 @@ export const processTranscription = action({
     try {
       // Set ragStatus → processing
       await ctx.runMutation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "documentChunks:updateTranscriptionRagStatus" as any,
+        internal.documentChunks.updateTranscriptionRagStatus,
         { transcriptionId, ragStatus: "processing" }
       );
 
       // Get transcription text
       const transcription = await ctx.runQuery(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "transcriptions:getTranscription" as any,
+        internal.transcriptions.getTranscription,
         { id: transcriptionId }
       );
       if (!transcription || !transcription.transcript) {
@@ -269,16 +212,14 @@ export const processTranscription = action({
           createdBy: transcription.createdBy,
         }));
         await ctx.runMutation(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "documentChunks:storeChunks" as any,
+          internal.documentChunks.storeChunks,
           { chunks: batch }
         );
       }
 
       // Set ragStatus → completed
       await ctx.runMutation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        "documentChunks:updateTranscriptionRagStatus" as any,
+        internal.documentChunks.updateTranscriptionRagStatus,
         { transcriptionId, ragStatus: "completed" }
       );
 
@@ -289,8 +230,7 @@ export const processTranscription = action({
       console.error(`[RAG] Failed to process transcription ${transcriptionId}: ${msg}`);
       try {
         await ctx.runMutation(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "documentChunks:updateTranscriptionRagStatus" as any,
+          internal.documentChunks.updateTranscriptionRagStatus,
           { transcriptionId, ragStatus: "failed" }
         );
       } catch { /* ignore */ }

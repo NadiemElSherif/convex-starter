@@ -76,7 +76,13 @@ export const update = mutation({
     assignedTo: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
+    const user = await requireAuth(ctx);
+
+    const todo = await ctx.db.get(args.id);
+    if (!todo) throw new Error("Todo not found");
+    if (todo.createdBy !== user._id && todo.assignedTo !== user._id) {
+      throw new Error("Not authorized to update this todo");
+    }
 
     const { id, ...updates } = args;
     const filtered: Record<string, unknown> = { updatedAt: Date.now() };
@@ -100,7 +106,14 @@ export const updateStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
+    const user = await requireAuth(ctx);
+
+    const todo = await ctx.db.get(args.id);
+    if (!todo) throw new Error("Todo not found");
+    if (todo.createdBy !== user._id && todo.assignedTo !== user._id) {
+      throw new Error("Not authorized to update this todo");
+    }
+
     await ctx.db.patch(args.id, {
       status: args.status,
       updatedAt: Date.now(),
@@ -113,7 +126,14 @@ export const remove = mutation({
     id: v.id("todos"),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
+    const user = await requireAuth(ctx);
+
+    const todo = await ctx.db.get(args.id);
+    if (!todo) throw new Error("Todo not found");
+    if (todo.createdBy !== user._id) {
+      throw new Error("Not authorized to delete this todo");
+    }
+
     await ctx.db.delete(args.id);
   },
 });

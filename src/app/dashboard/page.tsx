@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { NavHeader } from "@/components/nav-header";
 import Link from "next/link";
@@ -44,15 +43,8 @@ const features = [
 ];
 
 export default function DashboardPage() {
+  // User provisioning is handled by NavHeader
   const currentUser = useQuery(api.users.getCurrentUser);
-  const getOrCreateUser = useMutation(api.users.getOrCreateUser);
-
-  useEffect(() => {
-    // Auto-provision user on first visit
-    if (currentUser === null) {
-      getOrCreateUser().catch(console.error);
-    }
-  }, [currentUser, getOrCreateUser]);
 
   return (
     <div className="min-h-screen bg-gray-50">
