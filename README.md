@@ -23,17 +23,17 @@ A modular starter app demonstrating **Convex + Next.js** patterns with isolated 
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Copy env template
 cp .env.example .env.local
 # Fill in your Clerk, Convex, MinIO, OpenRouter, and NCAT credentials
 
 # Start Convex (first run creates a deployment)
-npx convex dev
+bunx convex dev
 
 # Start Next.js (separate terminal)
-npm run dev
+bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to see the app.

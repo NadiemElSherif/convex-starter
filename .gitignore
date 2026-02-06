@@ -20,5 +20,8 @@ next-env.d.ts
 # debug
 npm-debug.log*
 
+# package manager
+package-lock.json
+
 # convex generated
 convex/_generated/

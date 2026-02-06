@@ -54,13 +54,13 @@ Use `/agent-browser` whenever you need to visually verify the app in a browser, 
 
 ### Convex Gotchas
 
-- Schema changes require `npx convex dev` to be running (auto-pushes on save)
+- Schema changes require `bunx convex dev` to be running (auto-pushes on save)
 - Adding required fields to existing tables will fail if data exists - use `v.optional()` for new fields
 - `ctx.vectorSearch()` is only available inside actions, not queries/mutations
 - Vector index `filterFields` must be declared at schema time - you can't filter by arbitrary fields at query time
 - TypeScript: `tsconfig` has `strict: true` - annotate `.map()` callbacks on Convex query results
-- Type-check with `./node_modules/.bin/tsc --noEmit` (not `npx tsc`)
-- To clear existing data for schema migration: `npx convex import --replace-all -y empty-snapshot.zip`
+- Type-check with `bunx tsc --noEmit`
+- To clear existing data for schema migration: `bunx convex import --replace-all -y empty-snapshot.zip`
 
 ---
 
@@ -368,16 +368,16 @@ FILE DELETE:
 
 ```bash
 # 1. Install dependencies
-npm install
+bun install
 
 # 2. Copy env template and fill in values
 cp .env.example .env.local
 
 # 3. Start Convex backend (creates deployment on first run)
-npx convex dev
+bunx convex dev
 
 # 4. In a separate terminal, start Next.js
-npm run dev
+bun dev
 ```
 
 ## Setting Up Clerk
@@ -393,8 +393,8 @@ npm run dev
 
 | Variable | Where | Required | Description |
 |----------|-------|----------|-------------|
-| `CONVEX_DEPLOYMENT` | `.env.local` | Yes | Auto-set by `npx convex dev` |
-| `NEXT_PUBLIC_CONVEX_URL` | `.env.local` | Yes | Auto-set by `npx convex dev` |
+| `CONVEX_DEPLOYMENT` | `.env.local` | Yes | Auto-set by `bunx convex dev` |
+| `NEXT_PUBLIC_CONVEX_URL` | `.env.local` | Yes | Auto-set by `bunx convex dev` |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `.env.local` | Yes | Clerk publishable key |
 | `CLERK_SECRET_KEY` | `.env.local` | Yes | Clerk secret key |
 | `OPENROUTER_API_KEY` | Convex dashboard | For chat/RAG | OpenRouter API key |
@@ -418,6 +418,6 @@ npm run dev
 5. **Page**: Create `src/app/your-feature/page.tsx` (add `"use client"` directive) — use `/frontend-design` for UI quality
 6. **Nav**: Add a link in `src/components/nav-header.tsx`
 7. **Dashboard**: Add a card in `src/app/dashboard/page.tsx`
-8. Run `npx convex dev` to push schema changes
-9. **Type-check**: `./node_modules/.bin/tsc --noEmit`
+8. Run `bunx convex dev` to push schema changes
+9. **Type-check**: `bunx tsc --noEmit`
 10. **Security**: Run `/convex-security-check` before shipping
