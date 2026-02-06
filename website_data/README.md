@@ -2,6 +2,18 @@
 
 A complete, well-organized archive of all content from https://gopottynow.com/
 
+## 🔥 START HERE - Comprehensive App Information (New!)
+
+| File | Purpose |
+|------|---------|
+| 📋 **[APP_CAPABILITIES_SUMMARY.md](./APP_CAPABILITIES_SUMMARY.md)** | ✅ Complete checklist of EVERYTHING the app can do |
+| 🎯 **[APP_FEATURES.md](./APP_FEATURES.md)** | Deep dive into all features, methods, pricing, science |
+| ❓ **[FAQ.md](./FAQ.md)** | All questions answered with detailed explanations |
+
+**These three files are the most comprehensive app information available!**
+
+---
+
 ## Quick Navigation
 
 | Section | Content | File |

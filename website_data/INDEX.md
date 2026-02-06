@@ -23,6 +23,18 @@ website_data/
     └── README.md (Contact Us section)
 ```
 
+## 🔥 MUST-READ COMPREHENSIVE APP FILES (New!)
+
+| File | What It Contains |
+|------|-----------------|
+| **[APP_CAPABILITIES_SUMMARY.md](./APP_CAPABILITIES_SUMMARY.md)** | ✅ COMPLETE checklist of everything the app can do - most comprehensive overview |
+| **[APP_FEATURES.md](./APP_FEATURES.md)** | Detailed features, methods, pricing, scientific foundation - deep dive into app |
+| **[FAQ.md](./FAQ.md)** | All frequently asked questions with detailed answers about methods, challenges, guarantee |
+
+**Start here** if you want everything about what the app can do!
+
+---
+
 ## Content Overview
 
 ### 🏠 [Home](./home/README.md)
